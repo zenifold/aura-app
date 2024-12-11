@@ -1,25 +1,25 @@
 import { NextResponse } from 'next/server';
+import { auth } from '@clerk/nextjs';
 import { prisma } from '@/lib/prisma';
 
 export async function POST(request: Request) {
   try {
-    const { id, email, name } = await request.json();
-
-    if (!id || !email) {
+    const { userId } = auth();
+    
+    if (!userId) {
       return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
+        { error: 'Unauthorized' },
+        { status: 401 }
       );
     }
 
-    // Check database connection
-    try {
-      await prisma.$connect();
-    } catch (error) {
-      console.error('Database connection error:', error);
+    const { id, email, name } = await request.json();
+
+    // Verify the authenticated user matches the requested user
+    if (userId !== id) {
       return NextResponse.json(
-        { error: 'Database connection failed' },
-        { status: 500 }
+        { error: 'Unauthorized: User ID mismatch' },
+        { status: 403 }
       );
     }
 
@@ -35,21 +35,19 @@ export async function POST(request: Request) {
         email,
         name,
       },
-    });
-
-    // Check if user already has an organization
-    const existingOrg = await prisma.organization.findFirst({
-      where: {
-        members: {
-          some: {
-            id: user.id
+      include: {
+        organizations: {
+          select: {
+            id: true,
+            name: true,
           }
         }
       }
     });
 
-    if (!existingOrg) {
-      // Create a default organization for the user
+    // Check if user has an organization
+    if (user.organizations.length === 0) {
+      // Create default organization
       const organization = await prisma.organization.create({
         data: {
           name: "My Workspace",
@@ -59,67 +57,22 @@ export async function POST(request: Request) {
         }
       });
 
-      // Create a default project with sample tasks
-      await prisma.project.create({
-        data: {
-          name: "Getting Started",
-          description: "Welcome to Aura! Here are some tasks to help you get started.",
-          organization: {
-            connect: { id: organization.id }
-          },
-          members: {
-            connect: { id: user.id }
-          },
-          tasks: {
-            create: [
-              {
-                title: "👋 Welcome to Aura",
-                description: "This is your first project in Aura. Feel free to customize it or create a new one!",
-                status: "TODO",
-                priority: "HIGH",
-                createdBy: {
-                  connect: { id: user.id }
-                },
-                assignedTo: {
-                  connect: { id: user.id }
-                },
-                position: 0
-              },
-              {
-                title: "✨ Customize your workspace",
-                description: "Try creating a new project, adding tasks, and inviting team members.",
-                status: "TODO",
-                priority: "MEDIUM",
-                createdBy: {
-                  connect: { id: user.id }
-                },
-                assignedTo: {
-                  connect: { id: user.id }
-                },
-                position: 1
-              },
-              {
-                title: "🎯 Set your first milestone",
-                description: "Create a milestone by grouping related tasks together.",
-                status: "TODO",
-                priority: "MEDIUM",
-                createdBy: {
-                  connect: { id: user.id }
-                },
-                assignedTo: {
-                  connect: { id: user.id }
-                },
-                position: 2
-              }
-            ]
-          }
-        }
+      // Add organization to user response
+      user.organizations.push({
+        id: organization.id,
+        name: organization.name
       });
     }
 
-    return NextResponse.json({ user });
+    return NextResponse.json({
+      user: {
+        ...user,
+        organizationId: user.organizations[0]?.id || null,
+        organizationRole: 'admin', // Default role for now
+      }
+    });
   } catch (error) {
-    console.error('Error in user API route:', error);
+    console.error('Error in user API:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

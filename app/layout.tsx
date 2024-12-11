@@ -1,5 +1,9 @@
 import { Providers } from "@/components/providers";
+import { ClerkProvider } from "@clerk/nextjs";
+import { Inter } from "next/font/google";
 import "./globals.css";
+
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata = {
   title: 'Aura - Task Management',
@@ -13,11 +17,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>
-        <Providers>
-          {children}
-        </Providers>
-      </body>
+      <ClerkProvider>
+        <body className={inter.className}>
+          <Providers>
+            {children}
+          </Providers>
+        </body>
+      </ClerkProvider>
     </html>
   );
 }

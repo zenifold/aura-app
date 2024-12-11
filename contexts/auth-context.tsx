@@ -1,11 +1,19 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
-import { useUser } from "@clerk/nextjs";
+import { useUser, useAuth } from "@clerk/nextjs";
+
+type UserData = {
+  id: string;
+  email: string;
+  name: string | null;
+  organizationId: string | null;
+  organizationRole: string | null;
+};
 
 type AuthContextType = {
   isLoading: boolean;
-  userData: any | null;
+  userData: UserData | null;
   error: string | null;
 };
 
@@ -16,25 +24,29 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const { user, isLoaded, isSignedIn } = useUser();
-  const [userData, setUserData] = useState<any>(null);
+  const { user, isLoaded: isUserLoaded } = useUser();
+  const { getToken } = useAuth();
+  const [userData, setUserData] = useState<UserData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const syncUserData = async () => {
-      // Only sync if user is loaded and signed in
-      if (!isLoaded || !isSignedIn || !user) {
+      if (!isUserLoaded || !user) {
         setIsLoading(false);
         return;
       }
 
       try {
+        // Get the JWT token with our custom claims
+        const token = await getToken({ template: "Aura-JWT-Template" });
+        
         console.log('Syncing user data for:', user.id);
         const response = await fetch('/api/user', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
           },
           body: JSON.stringify({
             id: user.id,
@@ -43,14 +55,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           }),
         });
 
-        const data = await response.json();
-        
         if (!response.ok) {
-          throw new Error(data.error || 'Failed to sync user data');
+          const error = await response.json();
+          throw new Error(error.message || 'Failed to sync user data');
         }
 
-        console.log('User data synced:', data);
-        setUserData(data.user);
+        const data = await response.json();
+        setUserData({
+          id: data.user.id,
+          email: data.user.email,
+          name: data.user.name,
+          organizationId: data.user.organizationId,
+          organizationRole: data.user.organizationRole,
+        });
         setError(null);
       } catch (error) {
         console.error('Error syncing user data:', error);
@@ -62,7 +79,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
 
     syncUserData();
-  }, [user, isLoaded, isSignedIn]);
+  }, [user, isUserLoaded, getToken]);
 
   return (
     <AuthContext.Provider value={{ isLoading, userData, error }}>
@@ -71,4 +88,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   );
 };
 
-export const useAuth = () => useContext(AuthContext);
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
